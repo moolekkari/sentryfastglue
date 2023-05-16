@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -13,8 +13,6 @@ import (
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
-
-type contextKey int
 
 const valuesKey = "sentry"
 
@@ -58,6 +56,9 @@ func (h *Handler) Handle(handler fastglue.FastRequestHandler) fastglue.FastReque
 		// standard net/http.Request and because fasthttp.RequestCtx implements
 		// context.Context but requires string keys.
 		hub := sentry.CurrentHub().Clone()
+		if hub == nil {
+			hub = sentry.GetHubFromContext(ctx.RequestCtx)
+		}
 		scope := hub.Scope()
 		scope.SetRequest(convert(ctx))
 		scope.SetRequestBody(ctx.RequestCtx.Request.Body())
@@ -67,10 +68,10 @@ func (h *Handler) Handle(handler fastglue.FastRequestHandler) fastglue.FastReque
 	}
 }
 
-func (h *Handler) recoverWithSentry(hub *sentry.Hub, ctx *fastglue.Request) {
+func (h *Handler) recoverWithSentry(hub *sentry.Hub, req *fastglue.Request) {
 	if err := recover(); err != nil {
 		eventID := hub.RecoverWithContext(
-			context.WithValue(context.Background(), sentry.RequestContextKey, ctx),
+			context.WithValue(req.RequestCtx, sentry.RequestContextKey, req),
 			err,
 		)
 		if eventID != nil && h.waitForDelivery {
@@ -125,7 +126,7 @@ func convert(ctx *fastglue.Request) *http.Request {
 	r.URL.RawQuery = string(ctx.RequestCtx.URI().QueryString())
 
 	// Body
-	r.Body = ioutil.NopCloser(bytes.NewReader(ctx.RequestCtx.Request.Body()))
+	r.Body = io.NopCloser(bytes.NewReader(ctx.RequestCtx.Request.Body()))
 
 	return r
 }
